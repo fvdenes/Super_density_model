@@ -1,0 +1,107 @@
+---
+title: "Superdensity model with offsets"
+author: "Andrew Crosby"
+date: "January 19, 2018"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Purpose: Simulate data that refelcts the process modeled using the QPAD offsets and analyze using a standard glm and a hierarchical glm that accounts for variation in availbaility 
+
+
+First, simulate overall density (superdensity) at each station conditional on vegetation. Superdensity is analagous to superpopulation in that it is derived from the total number of individuls (N) that would use a site during a season, a subset of which are physically at the site during a given survey.
+
+```{r}
+R <- 100    # The number of sites
+T <- 3      # The number of surveys at each site
+set.seed(1234)
+# Simulate the vegetation and the abundances conditionl on vegetation
+veg <- sort(runif(R, -1.5, 1.5))    # The standardized vegetation at each site
+alpha <- 2
+beta1 <- 2
+beta2 <- -2
+lam <- exp(alpha + beta1*veg + beta2*(veg^2))
+N <- rpois(R, lam) 
+
+# Calculate the density per hectare, assuming N refers to abundance within a 100m radius circle
+sup.dens <- N/3.14
+```
+```{r, echo=FALSE}
+hist(sup.dens, main = "", xlab = "Superdensity")
+plot(veg, sup.dens, xlab = "Standardized vegetation index", ylab = "Superdensity", frame.plot = FALSE)
+points(veg, (lam/3.14), type="l")
+```
+
+Histogram of superdensities and plot of SUPERdensities conditional on vegetation.
+
+
+
+Next, simulate offets that account for detectability during 3 surveys at each site.
+
+```{r}
+
+# Simulate the offsets
+exp_off <- matrix(NA, R, T)
+for(i in 1:R){
+  for(j in 1:T){
+    exp_off[i, j] <- rgamma(1, 2, 2)
+  }
+}
+
+off <- log(exp_off)
+```
+
+Simulate the actual density at each site i during survey j as a subset of the superdensity
+
+```{r}
+# Simulate the precentage of superdensity available at each survey
+psisurv <- matrix(NA, R, T)
+for(i in 1:R){
+  psisurv[i, ] <- runif(T, 0.6, 1)
+}
+
+# Simulate the actual density during each survey
+delta <- sup.dens*psisurv
+
+# Simulate the lambda for count data at each site
+lambda <- delta*exp_off
+
+# Simulate the counts at each site
+y <- matrix(NA, R, T)
+for(i in 1:R){
+  for(j in 1:T){
+    y[i, j] <- rpois(1, lambda[i, j])
+  }
+}
+```
+```{r, echo=FALSE}
+hist(y, main = "", xlab = "Counts")
+plot(veg, y[,1], xlab = "Standardized vegetation index", ylab = "Counts", frame.plot = FALSE)
+```
+
+
+Run a standard glm on a single survey at each site using the simulated offsets and counts and compare to a naive model without the offsets
+```{r}
+mod <- glm(y[, 1] ~ veg + I(veg^2), family = poisson("log"), offset = off[, 1])
+summary(mod)    
+mod.naive <- glm(y[, 1] ~ veg + I(veg^2), family = poisson)
+summary(mod.naive)
+
+
+
+
+```
+```{r}
+
+plot(veg, sup.dens, xlab = "Standardized vegetation index", ylab = "Superdensity")
+points(veg, exp(predict(mod.naive, data = veg)), type="l")
+pred.mod <- exp(mod$coefficients[1] + mod$coefficients[2]*veg + mod$coefficients[3]*(veg^2))
+points(veg, pred.mod, type="l", lwd = 2, col="red")
+points(veg, lam/3.14, type="l", lty = 2, lwd = 2)
+
+```
+
+The above plot shows the actual superdensity (hollow circles), the expected density conditional on vegetation (dashed line), and the densities estimated from the poisson glm's. The solid black line is the prediction from the naive model and the red line is the prediction from the model using the offsets. In this case, there is not much difference. 
