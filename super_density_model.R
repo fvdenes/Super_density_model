@@ -177,32 +177,83 @@ N.yr <- matrix(NA, R, K)
 for(i in 1:R){
   N.yr[i, ] <- rpois(K, lam.yr[i, ])
 }
-  
+
+sup.dens.yr <- N.yr/3.14
 
 
-sup.dens <- N/3.14
+# Simulate the offsets
+exp_off.yr <- array(NA, dim = c(R, K, T))
+for(i in 1:R){
+  for(k in 1:K){
+    for(j in 1:T){
+      exp_off.yr[i, k, j] <- rgamma(1, 2, 2)
+    }
+  }
+}
+
+off.yr <- log(exp_off.yr)
+
+
+# Simulate the precentage of superdensity available at each survey in each year
+psisurv.yr <- array(NA, dim = c(R, K, T))
+for(i in 1:R){
+  for(k in 1:K){
+    psisurv.yr[i, k, ] <- runif(T, 0.6, 1)
+  }
+}
+
+# Simulate the actual density during each survey
+delta.yr <- array(NA, dim = c(R, K, T))
+for(k in 1:K){
+  delta.yr[, k, ] <- sup.dens.yr[, k]*psisurv.yr[, k, ]
+}
+
+# Simulate the lambda for count data at each site
+lambda.yr <- array(NA, dim = c(R, K, T))
+for(k in 1:K){
+  lambda.yr[, k, ] <- delta.yr[, k, ]*exp_off.yr[, k, ]
+}
+
+
+# Simulate the counts at each site
+y.yr <- array(NA, dim = c(R, K, T))
+for(i in 1:R){
+  for(k in 1:K){
+    for(j in 1:T){
+      y.yr[i, k, j] <- rpois(1, lambda.yr[i, k, j])
+    }
+  }
+}
+
+hist(y.yr[,1,])
+plot(veg, y.yr[,1,1])
+
 
 sink("qpad2.txt")
 cat("
     
     model{
+    for(k in 1:K){
+      alpha[k] ~ dnorm(0, 0.001)I(-5, 5)
+      }
     
-    alpha ~ dnorm(0, 0.001)I(-5, 5)
     beta1.d ~ dnorm(0, 0.001)I(-5, 5)
     beta2.d ~ dnorm(0, 0.001)
     
     
-    for(i in 1:R){
-      for(k in 1:YY){
-        sup.dens[i, k] <- exp(alpha + beta1.d*veg[i] + beta2.d*veg2[i])
+    for(k in 1:K){
+      for(i in 1:R){
+        sup.dens[i, k] <- exp(alpha[k] + beta1.d*veg[i] + beta2.d*veg2[i])
         for(j in 1:T){
           psi[i, k, j] ~ dunif(0, 1)
-          log(delta[i, k, j]) <- log(sup.dens[i]) + log(psi[i, j])
+          log(delta[i, k, j]) <- log(sup.dens[i, k]) + log(psi[i, k, j])
     
           log(lambda[i, k, j]) <- log(delta[i, k, j]) + off[i, k, j]
           y[i, k, j] ~ dpois(lambda[i, k, j])
         }
       }
+    # Derived quantities
+    meanD[k] <- mean(sup.dens[, k])
     }
     
   }
@@ -210,3 +261,19 @@ cat("
     
 ", fill=TRUE)
 sink()
+
+
+data <- list(y=y.yr, off=off.yr, R = R, T=T, K = K, veg=veg, veg2=veg2)
+
+params <- c("alpha", "beta1.d", "beta2.d", "meanD")
+
+inits <- function(){list(alpha=rnorm(K, 0, 1), beta1.d=rnorm(1, 0, 1), beta2.d=rnorm(1, 0, 1))}
+
+mod2 <- jags(data, inits, params, "qpad2.txt", n.chains=nc, n.iter=ni, n.burnin=nb, n.thin=nt)
+print(mod2, dig=2)
+
+plot(apply(sup.dens.yr, 2, mean), mod2$BUGSoutput$mean$meanD)
+
+par(mfrow=c(1, 2))
+
+plot(apply(sup.dens.yr, 2, mean), mod2$BUGSoutput$mean$meanD, xlab = "True mean density", ylab = "Estimated mean density", pch = 16, bty = "l")
